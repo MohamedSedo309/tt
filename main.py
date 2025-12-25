@@ -2,7 +2,7 @@ import os
 import ccxt
 import time
 
-# --- 1. CONFIGURATION ---
+# --- 1. CONFIGURATION & AUTH ---
 API_KEY = os.getenv('BINANCE_API_KEY')
 PRIVATE_KEY_CONTENT = os.getenv('BINANCE_PRIVATE_KEY', '').replace('\\n', '\n')
 
@@ -13,55 +13,82 @@ exchange = ccxt.binance({
     'options': {'defaultType': 'spot', 'adjustForTimeDifference': True}
 })
 
-# Singapore/International safe endpoints
+# Use Singapore-friendly endpoints
 exchange.urls['api']['public'] = 'https://data.binance.com/api/v3'
 exchange.urls['api']['private'] = 'https://api.binance.com/api/v3'
 
-# --- 2. THE STRATEGY SETTINGS ---
-MIN_PROFIT = 0.005 # 0.5% net profit goal
-FEE = 0.00075      # 0.075% (Assumes you have BNB for fees)
+# --- 2. TRADING SETTINGS ---
+MIN_PROFIT = 0.005  # 0.5% Net Profit
+FEE_PERCENT = 0.00075  # 0.075% per trade (With BNB)
 
 def get_balance():
+    """Checks your current USDT balance to use for compounding."""
     try:
         balance = exchange.fetch_balance()
         return float(balance['total']['USDT'])
-    except: return 0.0
+    except:
+        return 0.0
 
-def execute_trade(path, amount):
-    """Refined execution: Step 2 trades the middle coin immediately."""
+def execute_trade_cycle(path, amount):
+    """Executes the trades. The '#' makes it 'Simulation Mode' for safety."""
     try:
-        print(f"💰 PROFIT DETECTED! Path: {'->'.join(path)} | Size: ${amount:.2f}")
-        # --- REMOVE '#' BELOW TO GO LIVE ---
+        print(f"💰 PROFIT FOUND! Path: {' -> '.join(path)} | Amount: ${amount:.2f}")
+        
+        # --- TO GO LIVE: REMOVE THE '#' FROM THE 3 LINES BELOW ---
         # exchange.create_market_buy_order(f"{path[1]}/USDT", amount)
         # exchange.create_market_order(f"{path[2]}/{path[1]}", 'buy', amount)
         # exchange.create_market_sell_order(f"{path[2]}/USDT", amount)
-        print("✅ Cycle Complete.")
+        
+        print("✅ Cycle Finished.")
     except Exception as e:
         print(f"❌ Execution Error: {e}")
 
-def run_bot():
-    # Expanded list of high-volume coins to find more opportunities
-    coins = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOT', 'LTC', 'MATIC', 'TRX']
+def run_scanner():
+    # Base coins to check for triangles
+    coins = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'LTC']
     paths = []
-    for c1 in coins[:3]: # BTC, ETH, BNB as base 'bridge' coins
-        for c2 in coins:
-            if c1 != c2:
-                paths.append(['USDT', c1, c2, 'USDT'])
+    for base in ['BTC', 'ETH', 'BNB']:
+        for alt in coins:
+            if base != alt:
+                paths.append(['USDT', base, alt, 'USDT'])
 
-    print(f"🚀 Scanner Live in Singapore | Monitoring {len(paths)} Paths")
-
+    print(f"🚀 BOT STARTING | Region: Singapore | Paths: {len(paths)}")
+    
     while True:
         try:
-            current_usdt = get_balance()
-            if current_usdt < 1.05:
-                print(f"⚠️ Low Balance: ${current_usdt:.2f}. Deposit to continue.", end='\r')
-                time.sleep(30); continue
+            current_balance = get_balance()
+            
+            # Safety: Minimum $1.10 needed for Binance trades
+            if current_balance < 1.10:
+                print(f"⚠️ Balance too low: ${current_balance:.2f} ", end='\r')
+                time.sleep(30)
+                continue
 
             tickers = exchange.fetch_tickers()
-            best_profit = -1.0
-            
-            for t in paths:
+            best_opp = -1.0
+
+            for loop in paths:
                 try:
-                    # Real-world Bid/Ask logic
-                    p1 = 1 / tickers[f"{t[1]}/USDT"]['ask']
-                    p2 = 1 / tickers
+                    # Logic: Buy Base -> Buy Alt with Base -> Sell Alt for USDT
+                    p1 = 1 / tickers[f"{loop[1]}/USDT"]['ask']
+                    p2 = 1 / tickers[f"{loop[2]}/{loop[1]}"]['ask']
+                    p3 = tickers[f"{loop[2]}/USDT"]['bid']
+                    
+                    final_amt = current_balance * p1 * p2 * p3
+                    profit = (final_amt - current_balance) / current_balance - (FEE_PERCENT * 3)
+                    
+                    if profit > best_opp: best_opp = profit
+                    if profit > MIN_PROFIT:
+                        execute_trade_cycle(loop, current_balance)
+                except:
+                    continue # Skip if a specific pair isn't trading
+
+            print(f"Scanning... Bal: ${current_balance:.2f} | Best: {best_opp:.4%}", end='\r')
+            time.sleep(1)
+            
+        except Exception as e:
+            print(f"\nConnection Error: {e}")
+            time.sleep(10)
+
+if __name__ == "__main__":
+    run_scanner()
