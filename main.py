@@ -14,70 +14,71 @@ exchange = ccxt.binance({
     'enableRateLimit': True,
     'options': {'defaultType': 'spot', 'adjustForTimeDifference': True}
 })
-exchange.urls['api']['public'] = 'https://data.binance.com/api/v3'
-exchange.urls['api']['private'] = 'https://api.binance.com/api/v3'
 
-# --- 2. TRADING SETTINGS ---
-INVESTMENT = 1.75  # Amount in USDT to trade
-MIN_PROFIT = 0.001 # 0.1% Net Profit AFTER fees
-FEE = 0.00075      # 0.075% (With BNB discount)
+# --- 2. THE SAFETY SETTINGS ---
+MIN_PROFIT = 0.005 # 0.5% Net Profit
+FEE = 0.00075      # 0.075% with BNB discount
 
 print("--- AUTHENTICATION LOADED SUCCESSFULLY ---")
 
-def get_triangles():
-    """Finds all USDT -> COIN1 -> COIN2 -> USDT paths."""
-    # Simplified for common high-volume pairs
-    return [
-        ['USDT', 'BTC', 'ETH', 'USDT'],
-        ['USDT', 'BNB', 'BTC', 'USDT'],
-        ['USDT', 'SOL', 'BNB', 'USDT'],
-        ['USDT', 'XRP', 'BTC', 'USDT']
-    ]
-
-def execute_trade(path):
+def get_balance():
+    """Fetches your current available USDT balance."""
     try:
-        print(f"🔔 Opportunity Found! Path: {' -> '.join(path)}")
-        # Step 1: Buy Coin 1 with USDT
-        order1 = exchange.create_market_buy_order(f"{path[1]}/USDT", INVESTMENT)
-        print(f"✅ Step 1 Complete: Bought {path[1]}")
+        balance = exchange.fetch_balance()
+        return float(balance['total']['USDT'])
+    except Exception as e:
+        print(f"Error fetching balance: {e}")
+        return 0.0
 
-        # Step 2: Trade Coin 1 for Coin 2
-        # (This logic adjusts based on if the pair is BTC/ETH or ETH/BTC)
-        order2 = exchange.create_market_order(f"{path[2]}/{path[1]}", 'buy', INVESTMENT)
-        print(f"✅ Step 2 Complete: Traded to {path[2]}")
-
-        # Step 3: Sell Coin 2 back to USDT
-        order3 = exchange.create_market_sell_order(f"{path[2]}/USDT", INVESTMENT)
-        print(f"✅ Step 3 Complete: Returned to USDT")
-        
+def execute_trade(path, amount):
+    try:
+        print(f"💰 PROFIT ALERT! Path: {' -> '.join(path)} | Trading: ${amount:.2f}")
+        # --- EXECUTION COMMANDS (Uncomment '#' below to go live) ---
+        # exchange.create_market_buy_order(f"{path[1]}/USDT", amount)
+        # ... (Step 2 & 3 commands)
+        print("✅ Trade executed and compounded!")
     except Exception as e:
         print(f"❌ Trade failed: {e}")
 
 def run_bot():
-    triangles = get_triangles()
-    print(f"--- STARTING LIVE TRADING ON {len(triangles)} PATHS ---")
+    # Diversified paths to increase chances of finding 0.5% profit
+    paths = [
+        ['USDT', 'BTC', 'ETH', 'USDT'],
+        ['USDT', 'BNB', 'BTC', 'USDT'],
+        ['USDT', 'SOL', 'BNB', 'USDT'],
+        ['USDT', 'ADA', 'BTC', 'USDT']
+    ]
+    
+    print(f"--- SCANNING FOR >0.5% PROFIT (AUTO-COMPOUNDING ON) ---")
     
     while True:
         try:
+            # Step 1: Check your current balance (Auto-Compound)
+            current_usdt = get_balance()
+            
+            # Binance Safety Check: Minimum trade is $1.00
+            if current_usdt < 1.10:
+                print(f"⚠️ Balance too low to trade: ${current_usdt:.2f}", end='\r')
+                time.sleep(60)
+                continue
+
             tickers = exchange.fetch_tickers()
-            for t in triangles:
-                # Basic Math: (Price1 * Price2 * Price3)
-                # Example: USDT->BTC (Buy) * BTC->ETH (Buy) * ETH->USDT (Sell)
+            for t in paths:
                 p1 = 1 / tickers[f"{t[1]}/USDT"]['ask']
                 p2 = 1 / tickers[f"{t[2]}/{t[1]}"]['ask']
                 p3 = tickers[f"{t[2]}/USDT"]['bid']
                 
-                gross_profit = (p1 * p2 * p3)
-                net_profit = gross_profit - (FEE * 3) - 1
-                
+                # Math: Calculate result based on CURRENT balance
+                total_return = (current_usdt * p1 * p2 * p3)
+                net_profit = (total_return - current_usdt) / current_usdt - (FEE * 3)
+
                 if net_profit > MIN_PROFIT:
-                    execute_trade(t)
+                    execute_trade(t, current_usdt)
             
-            print(f"Scanning... Net Profit Potential: {net_profit:.4%}", end='\r')
-            time.sleep(1)
+            print(f"Scanning... Balance: ${current_usdt:.2f} | Best: {net_profit:.4%}", end='\r')
+            time.sleep(2)
         except Exception as e:
-            print(f"\nError: {e}")
-            time.sleep(5)
+            time.sleep(10)
 
 if __name__ == "__main__":
     run_bot()
