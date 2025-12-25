@@ -3,7 +3,7 @@ import ccxt
 import time
 from datetime import datetime
 
-# --- 1. CONFIGURATION & AUTH ---
+# --- 1. CONFIGURATION ---
 API_KEY = os.getenv('BINANCE_API_KEY')
 PRIVATE_KEY_CONTENT = os.getenv('BINANCE_PRIVATE_KEY', '').replace('\\n', '\n')
 
@@ -18,93 +18,101 @@ exchange = ccxt.binance({
 exchange.urls['api']['public'] = 'https://data.binance.com/api/v3'
 exchange.urls['api']['private'] = 'https://api.binance.com/api/v3'
 
-# --- 2. LIVE STRATEGY SETTINGS ---
-MIN_PROFIT = 0.005  # 0.5% Net Profit threshold
-FEE_RATE = 0.00075  # 0.075% per leg (Total 0.225% for 3 trades)
+# --- 2. LIVE SETTINGS ---
+MIN_PROFIT = 0.005  # 0.5% Net Goal
+FEE = 0.00075      # 0.075% (Assumes BNB for fees)
 
 def get_balance():
     try:
         balance = exchange.fetch_balance()
         return float(balance['total']['USDT'])
-    except: return 0.0
+    except Exception as e:
+        print(f"!! Balance Error: {e}")
+        return 0.0
 
-def execute_live_trade(path, amount):
-    """LIVE EXECUTION: Orders are sent immediately to Binance."""
+def execute_trade(path, amount):
+    """LIVE EXECUTION with full transparency logs."""
     start_time = time.time()
     try:
-        print("\n" + "="*50)
-        print(f"🚨 LIVE TRADE INITIATED | Path: {' -> '.join(path)}")
-        print(f"💰 Starting Capital: ${amount:.4f} USDT")
-
-        # Leg 1: USDT -> Base Coin
+        print("\n" + "💰" * 15)
+        print(f"!!! ARBITRAGE DETECTED: {' -> '.join(path)} !!!")
+        
+        # LEG 1
+        print(f"Executing Leg 1: Buying {path[1]} with ${amount:.2f} USDT...")
         order1 = exchange.create_market_buy_order(f"{path[1]}/USDT", amount)
-        buy_qty = order1['filled']
-        print(f"Leg 1: Bought {buy_qty:.6f} {path[1]}")
+        qty1 = order1['filled']
+        print(f"✅ Success: Bought {qty1:.6f} {path[1]}")
 
-        # Leg 2: Base Coin -> Alt Coin
-        order2 = exchange.create_market_order(f"{path[2]}/{path[1]}", 'buy', buy_qty)
-        alt_qty = order2['filled']
-        print(f"Leg 2: Swapped to {alt_qty:.6f} {path[2]}")
+        # LEG 2
+        print(f"Executing Leg 2: Swapping {path[1]} for {path[2]}...")
+        order2 = exchange.create_market_order(f"{path[2]}/{path[1]}", 'buy', qty1)
+        qty2 = order2['filled']
+        print(f"✅ Success: Received {qty2:.6f} {path[2]}")
 
-        # Leg 3: Alt Coin -> USDT
-        order3 = exchange.create_market_sell_order(f"{path[2]}/USDT", alt_qty)
+        # LEG 3
+        print(f"Executing Leg 3: Selling {path[2]} back to USDT...")
+        order3 = exchange.create_market_sell_order(f"{path[2]}/USDT", qty2)
         final_usdt = order3['cost']
-        print(f"Leg 3: Returned to ${final_usdt:.4f} USDT")
+        print(f"✅ Success: Returned to ${final_usdt:.4f} USDT")
 
-        # Calculate Results
-        execution_time = time.time() - start_time
-        gross_profit = final_usdt - amount
-        total_fees = (amount + final_usdt) * FEE_RATE # Simplified fee estimate
-        net_profit = gross_profit - total_fees
-
-        print("-" * 30)
-        print(f"📊 SUMMARY REPORT ({datetime.now().strftime('%H:%M:%S')})")
-        print(f"   Net Profit:  ${net_profit:.6f}")
-        print(f"   Total Fees:  ${total_fees:.6f}")
-        print(f"   Time Taken:  {execution_time:.2f} seconds")
-        print("="*50 + "\n")
-
+        # PROFIT REPORT
+        net = final_usdt - amount
+        print(f"--- TRADE SUMMARY ---")
+        print(f"Profit/Loss: ${net:.6f}")
+        print(f"Time Taken:  {time.time() - start_time:.2f}s")
+        print("💰" * 15 + "\n")
     except Exception as e:
-        print(f"❌ CRITICAL EXECUTION ERROR: {e}")
+        print(f"❌ EXECUTION FAILED: {e}")
 
-def run_scanner():
+def run_bot():
     coins = ['BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'LTC', 'MATIC', 'DOT']
     paths = []
     for base in ['BTC', 'ETH', 'BNB']:
         for alt in coins:
-            if base != alt:
-                paths.append(['USDT', base, alt, 'USDT'])
+            if base != alt: paths.append(['USDT', base, alt, 'USDT'])
 
-    print(f"🚀 BOT LIVE IN SINGAPORE | Monitoring {len(paths)} Paths")
-    
+    print(f"🚀 BOT LIVE IN SINGAPORE | Total Paths: {len(paths)}")
+
     while True:
         try:
-            current_bal = get_balance()
-            if current_bal < 1.10:
-                print(f"⚠️ Balance ${current_bal:.2f} too low for trade legs. Waiting...", end='\r')
-                time.sleep(30); continue
+            current_usdt = get_balance()
+            if current_usdt < 1.05:
+                print(f"⚠️ Low Balance: ${current_usdt:.2f} | Deposit USDT to resume.", end='\r')
+                time.sleep(10); continue
 
             tickers = exchange.fetch_tickers()
-            best_opp = -1.0
+            best_roi = -1.0
+            best_path = ""
 
-            for loop in paths:
+            # Transparency Section: Log every check
+            print(f"\n[SCAN {datetime.now().strftime('%H:%M:%S')}] Balance: ${current_usdt:.2f}")
+            
+            for p in paths:
                 try:
-                    p1 = 1 / tickers[f"{loop[1]}/USDT"]['ask']
-                    p2 = 1 / tickers[f"{loop[2]}/{loop[1]}"]['ask']
-                    p3 = tickers[f"{loop[2]}/USDT"]['bid']
+                    # Raw Price Capture
+                    p1 = 1 / tickers[f"{p[1]}/USDT"]['ask']
+                    p2 = 1 / tickers[f"{p[2]}/{p[1]}"]['ask']
+                    p3 = tickers[f"{p[2]}/USDT"]['bid']
                     
-                    est_return = current_bal * p1 * p2 * p3
-                    net = (est_return - current_bal) / current_bal - (FEE_RATE * 3)
+                    # Math Logic
+                    roi = (current_usdt * p1 * p2 * p3 - current_usdt) / current_usdt - (FEE * 3)
                     
-                    if net > best_opp: best_opp = net
-                    if net > MIN_PROFIT:
-                        execute_live_trade(loop, current_bal)
+                    # Keep track of best
+                    if roi > best_roi:
+                        best_roi = roi
+                        best_path = f"{p[1]}->{p[2]}"
+
+                    # Trigger Trade
+                    if roi > MIN_PROFIT:
+                        execute_trade(p, current_usdt)
                 except: continue
 
-            print(f"Scanning... Bal: ${current_bal:.2f} | Best Opp: {best_opp:.4%}", end='\r')
-            time.sleep(1)
+            print(f"  > Current Best: {best_path} at {best_roi:.4%}")
+            time.sleep(1) # Controls scan speed
+
         except Exception as e:
-            time.sleep(10)
+            print(f"Main Loop Error: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
-    run_scanner()
+    run_bot()
