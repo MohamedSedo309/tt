@@ -1,0 +1,25 @@
+import os
+import ccxt
+import time
+
+# --- SECURITY: Get keys from Railway Variables ---
+API_KEY = os.getenv('BINANCE_API_KEY')
+# This is the block of text from your Private_key.txt
+PRIVATE_KEY_CONTENT = os.getenv('BINANCE_PRIVATE_KEY')
+
+# Initialize Binance with the NEW Key Logic
+exchange = ccxt.binance({
+    'apiKey': API_KEY,
+    'secret': PRIVATE_KEY_CONTENT,  # CCXT recognizes the Ed25519 text format automatically
+    'enableRateLimit': True,
+    'options': {
+        'defaultType': 'spot',
+        'adjustForTimeDifference': True,
+    }
+})
+
+# Bypass US Cloud restrictions (International Endpoints)
+exchange.urls['api']['public'] = 'https://data.binance.com/api/v3'
+exchange.urls['api']['private'] = 'https://api.binance.com/api/v3'
+
+# ... (The rest of your find_triangles and run_scanner functions remain the same)
