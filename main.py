@@ -1,3 +1,4 @@
+print("--- BOT IS ATTEMPTING TO START ---")
 import os
 import ccxt
 import time
